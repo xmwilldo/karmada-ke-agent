@@ -124,6 +124,10 @@ func (c *Controller) tryDeleteWorkload(cluster *v1alpha1.Cluster, work *workv1al
 			return err
 		}
 
+		if workload.GetKind() == "Namespace" {
+			workload.SetName(fmt.Sprintf("%s-%s", workload.GetName(), cluster.Name))
+		}
+
 		err = c.ObjectWatcher.Delete(cluster, workload)
 		if err != nil {
 			klog.Errorf("Failed to delete resource in the given member cluster %v, err is %v", cluster.Name, err)
@@ -206,6 +210,9 @@ func (c *Controller) syncToClusters(cluster *v1alpha1.Cluster, work *workv1alpha
 }
 
 func (c *Controller) tryUpdateWorkload(cluster *v1alpha1.Cluster, workload *unstructured.Unstructured, clusterDynamicClient *util.DynamicClusterClient) error {
+	if workload.GetKind() == "Namespace" {
+		workload.SetName(fmt.Sprintf("%s-%s", workload.GetName(), cluster.Name))
+	}
 	// todo: get clusterObj from cache
 	dynamicResource, err := restmapper.GetGroupVersionResource(c.RESTMapper, workload.GroupVersionKind())
 	if err != nil {
@@ -231,6 +238,10 @@ func (c *Controller) tryUpdateWorkload(cluster *v1alpha1.Cluster, workload *unst
 }
 
 func (c *Controller) tryCreateWorkload(cluster *v1alpha1.Cluster, workload *unstructured.Unstructured) error {
+	if workload.GetKind() == "Namespace" {
+		workload.SetName(fmt.Sprintf("%s-%s", workload.GetName(), cluster.Name))
+	}
+
 	err := c.ObjectWatcher.Create(cluster, workload)
 	if err != nil {
 		klog.Errorf("Failed to create resource in the given member cluster %s, err is %v", cluster.Name, err)

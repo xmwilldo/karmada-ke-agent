@@ -1,6 +1,8 @@
 package helper
 
 import (
+	"strings"
+
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -129,16 +131,17 @@ func NewPredicateForServiceExportController(mgr controllerruntime.Manager) predi
 }
 
 // NewClusterPredicateOnAgent generates an event filter function with Cluster for karmada-agent.
-func NewClusterPredicateOnAgent(clusterName string) predicate.Funcs {
+func NewClusterPredicateOnAgent(clusters string) predicate.Funcs {
 	return predicate.Funcs{
 		CreateFunc: func(createEvent event.CreateEvent) bool {
-			return createEvent.Object.GetName() == clusterName
+			return strings.Contains(clusters, createEvent.Object.GetName())
 		},
 		UpdateFunc: func(updateEvent event.UpdateEvent) bool {
-			return updateEvent.ObjectOld.GetName() == clusterName
+			return strings.Contains(clusters, updateEvent.ObjectOld.GetName())
+
 		},
 		DeleteFunc: func(deleteEvent event.DeleteEvent) bool {
-			return deleteEvent.Object.GetName() == clusterName
+			return strings.Contains(clusters, deleteEvent.Object.GetName())
 		},
 		GenericFunc: func(genericEvent event.GenericEvent) bool {
 			return false
@@ -147,7 +150,7 @@ func NewClusterPredicateOnAgent(clusterName string) predicate.Funcs {
 }
 
 // NewPredicateForServiceExportControllerOnAgent generates an event filter function for ServiceExport controller running by karmada-agent.
-func NewPredicateForServiceExportControllerOnAgent(curClusterName string) predicate.Funcs {
+func NewPredicateForServiceExportControllerOnAgent(Clusters string) predicate.Funcs {
 	return predicate.Funcs{
 		CreateFunc: func(createEvent event.CreateEvent) bool {
 			return false
@@ -165,7 +168,8 @@ func NewPredicateForServiceExportControllerOnAgent(curClusterName string) predic
 				klog.Errorf("Failed to get member cluster name for work %s/%s", obj.GetNamespace(), obj.GetName())
 				return false
 			}
-			return clusterName == curClusterName
+
+			return strings.Contains(Clusters, clusterName)
 		},
 		DeleteFunc: func(deleteEvent event.DeleteEvent) bool {
 			return false

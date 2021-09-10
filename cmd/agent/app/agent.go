@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
@@ -24,7 +25,6 @@ import (
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util/gclient"
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util/helper"
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util/informermanager"
-	"github.com/xmwilldo/karmada-ke-agent/pkg/util/names"
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util/objectwatcher"
 )
 
@@ -38,7 +38,7 @@ func NewAgentCommand(ctx context.Context) *cobra.Command {
 		Long: `The karmada agent runs the cluster registration agent`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := run(ctx, karmadaConfig, opts); err != nil {
-				fmt.Fprintf(os.Stderr, "%v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "%v\n", err)
 				os.Exit(1)
 			}
 		},
@@ -56,22 +56,22 @@ func run(ctx context.Context, karmadaConfig karmadactl.KarmadaConfig, opts *opti
 	}
 	controlPlaneRestConfig.QPS, controlPlaneRestConfig.Burst = opts.KubeAPIQPS, opts.KubeAPIBurst
 
-	err = registerWithControlPlaneAPIServer(controlPlaneRestConfig, opts.ClusterName)
+	err = registerWithControlPlaneAPIServer(controlPlaneRestConfig, opts.Clusters)
 	if err != nil {
 		return fmt.Errorf("failed to register with karmada control plane: %s", err.Error())
 	}
 
-	executionSpace, err := names.GenerateExecutionSpaceName(opts.ClusterName)
-	if err != nil {
-		klog.Errorf("Failed to generate execution space name for member cluster %s, err is %v", opts.ClusterName, err)
-		return err
-	}
+	//executionSpace, err := names.GenerateExecutionSpaceName(opts.ClusterName)
+	//if err != nil {
+	//	klog.Errorf("Failed to generate execution space name for member cluster %s, err is %v", opts.ClusterName, err)
+	//	return err
+	//}
 
 	controllerManager, err := controllerruntime.NewManager(controlPlaneRestConfig, controllerruntime.Options{
-		Scheme:                     gclient.NewSchema(),
-		Namespace:                  executionSpace,
+		Scheme: gclient.NewSchema(),
+		//Namespace:                  executionSpace,
 		LeaderElection:             opts.LeaderElection.LeaderElect,
-		LeaderElectionID:           fmt.Sprintf("karmada-agent-%s", opts.ClusterName),
+		LeaderElectionID:           fmt.Sprintf("karmada-agent-%s", "kubeedge-clusters"),
 		LeaderElectionNamespace:    opts.LeaderElection.ResourceNamespace,
 		LeaderElectionResourceLock: opts.LeaderElection.ResourceLock,
 	})
@@ -96,7 +96,7 @@ func setupControllers(mgr controllerruntime.Manager, opts *options.Options, stop
 		Client:                            mgr.GetClient(),
 		KubeClient:                        kubeclientset.NewForConfigOrDie(mgr.GetConfig()),
 		EventRecorder:                     mgr.GetEventRecorderFor(status.ControllerName),
-		PredicateFunc:                     helper.NewClusterPredicateOnAgent(opts.ClusterName),
+		PredicateFunc:                     helper.NewClusterPredicateOnAgent(opts.Clusters),
 		InformerManager:                   informermanager.GetInstance(),
 		StopChan:                          stopChan,
 		ClusterClientSetFunc:              util.NewClusterClientSetForAgent,
@@ -146,7 +146,7 @@ func setupControllers(mgr controllerruntime.Manager, opts *options.Options, stop
 		InformerManager:             informermanager.GetInstance(),
 		StopChan:                    stopChan,
 		WorkerNumber:                1,
-		PredicateFunc:               helper.NewPredicateForServiceExportControllerOnAgent(opts.ClusterName),
+		PredicateFunc:               helper.NewPredicateForServiceExportControllerOnAgent(opts.Clusters),
 		ClusterDynamicClientSetFunc: util.NewClusterDynamicClientSetForAgent,
 	}
 	serviceExportController.RunWorkQueue()
@@ -161,7 +161,7 @@ func setupControllers(mgr controllerruntime.Manager, opts *options.Options, stop
 	}()
 }
 
-func registerWithControlPlaneAPIServer(controlPlaneRestConfig *restclient.Config, memberClusterName string) error {
+func registerWithControlPlaneAPIServer(controlPlaneRestConfig *restclient.Config, Clusters string) error {
 	client := gclient.NewForConfigOrDie(controlPlaneRestConfig)
 
 	namespaceObj := &corev1.Namespace{}
@@ -172,13 +172,16 @@ func registerWithControlPlaneAPIServer(controlPlaneRestConfig *restclient.Config
 		return err
 	}
 
-	clusterObj := &clusterv1alpha1.Cluster{}
-	clusterObj.Name = memberClusterName
-	clusterObj.Spec.SyncMode = clusterv1alpha1.Pull
+	memberClusters := strings.Split(Clusters, ",")
+	for _, memberClusterName := range memberClusters {
+		clusterObj := &clusterv1alpha1.Cluster{}
+		clusterObj.Name = memberClusterName
+		clusterObj.Spec.SyncMode = clusterv1alpha1.Pull
 
-	if err := util.CreateClusterIfNotExist(client, clusterObj); err != nil {
-		klog.Errorf("Failed to create cluster(%s) object, error: %v", clusterObj.Name, err)
-		return err
+		if err := util.CreateClusterIfNotExist(client, clusterObj); err != nil {
+			klog.Errorf("Failed to create cluster(%s) object, error: %v", clusterObj.Name, err)
+			return err
+		}
 	}
 
 	return nil

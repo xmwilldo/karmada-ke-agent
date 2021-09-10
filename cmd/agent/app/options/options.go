@@ -18,7 +18,8 @@ type Options struct {
 	// ClusterContext is the name of the cluster context in control plane KUBECONFIG file.
 	// Default value is the current-context.
 	KarmadaContext string
-	ClusterName    string
+	// Clusters string, clusters for KubeEdge, separated by commas
+	Clusters string
 
 	// ClusterStatusUpdateFrequency is the frequency that controller computes and report cluster status.
 	// It must work with ClusterMonitorGracePeriod(--cluster-monitor-grace-period) in karmada-controller-manager.
@@ -47,6 +48,9 @@ func NewOptions() *Options {
 			ResourceLock:      resourcelock.LeasesResourceLock,
 			ResourceNamespace: util.NamespaceKarmadaSystem,
 		},
+		KarmadaKubeConfig: "/root/.kube/karmada.config",
+		KarmadaContext:    "karmada-apiserver",
+		Clusters:          "ke-beijing-cluster,ke-hangzhou-cluster",
 	}
 }
 
@@ -59,8 +63,8 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&o.LeaderElection.LeaderElect, "leader-elect", true, "Start a leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability.")
 	fs.StringVar(&o.LeaderElection.ResourceNamespace, "leader-elect-resource-namespace", util.NamespaceKarmadaSystem, "The namespace of resource object that is used for locking during leader election.")
 	fs.StringVar(&o.KarmadaKubeConfig, "karmada-kubeconfig", o.KarmadaKubeConfig, "Path to karmada control plane kubeconfig file.")
-	fs.StringVar(&o.KarmadaContext, "karmada-context", "", "Name of the cluster context in karmada control plane kubeconfig file.")
-	fs.StringVar(&o.ClusterName, "cluster-name", o.ClusterName, "Name of member cluster that the agent serves for.")
+	fs.StringVar(&o.KarmadaContext, "karmada-context", o.KarmadaContext, "Name of the cluster context in karmada control plane kubeconfig file.")
+	fs.StringVar(&o.Clusters, "cluster-name", o.Clusters, "Name of member cluster that the agent serves for.")
 	fs.DurationVar(&o.ClusterStatusUpdateFrequency.Duration, "cluster-status-update-frequency", 10*time.Second, "Specifies how often karmada-agent posts cluster status to karmada-apiserver. Note: be cautious when changing the constant, it must work with ClusterMonitorGracePeriod in karmada-controller-manager.")
 	fs.DurationVar(&o.ClusterLeaseDuration.Duration, "cluster-lease-duration", 40*time.Second,
 		"Specifies the expiration period of a cluster lease.")
