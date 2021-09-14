@@ -56,6 +56,8 @@ const (
 
 // Define resource kind.
 const (
+	// NamespaceKind indicates the target resource is a namespace
+	NamespaceKind = "Namespace"
 	// DeploymentKind indicates the target resource is a deployment
 	DeploymentKind = "Deployment"
 	// ServiceKind indicates the target resource is a service

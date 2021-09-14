@@ -2,8 +2,10 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -124,8 +126,8 @@ func (c *Controller) tryDeleteWorkload(cluster *v1alpha1.Cluster, work *workv1al
 			return err
 		}
 
-		if workload.GetKind() == "Namespace" {
-			workload.SetName(fmt.Sprintf("%s-%s", workload.GetName(), cluster.Name))
+		if err := changeWorkload(cluster, workload); err != nil {
+			return err
 		}
 
 		err = c.ObjectWatcher.Delete(cluster, workload)
@@ -210,9 +212,10 @@ func (c *Controller) syncToClusters(cluster *v1alpha1.Cluster, work *workv1alpha
 }
 
 func (c *Controller) tryUpdateWorkload(cluster *v1alpha1.Cluster, workload *unstructured.Unstructured, clusterDynamicClient *util.DynamicClusterClient) error {
-	if workload.GetKind() == "Namespace" {
-		workload.SetName(fmt.Sprintf("%s-%s", workload.GetName(), cluster.Name))
+	if err := changeWorkload(cluster, workload); err != nil {
+		return err
 	}
+
 	// todo: get clusterObj from cache
 	dynamicResource, err := restmapper.GetGroupVersionResource(c.RESTMapper, workload.GroupVersionKind())
 	if err != nil {
@@ -238,8 +241,8 @@ func (c *Controller) tryUpdateWorkload(cluster *v1alpha1.Cluster, workload *unst
 }
 
 func (c *Controller) tryCreateWorkload(cluster *v1alpha1.Cluster, workload *unstructured.Unstructured) error {
-	if workload.GetKind() == "Namespace" {
-		workload.SetName(fmt.Sprintf("%s-%s", workload.GetName(), cluster.Name))
+	if err := changeWorkload(cluster, workload); err != nil {
+		return err
 	}
 
 	err := c.ObjectWatcher.Create(cluster, workload)
@@ -264,4 +267,86 @@ func (c *Controller) updateAppliedCondition(work *workv1alpha1.Work, status meta
 	meta.SetStatusCondition(&work.Status.Conditions, newWorkAppliedCondition)
 	err := c.Client.Status().Update(context.TODO(), work)
 	return err
+}
+
+type patchOperation struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value,omitempty"`
+}
+
+// changeWorkload change the workload based on the workload kind
+func changeWorkload(cluster *v1alpha1.Cluster, workload *unstructured.Unstructured) error {
+	switch workload.GetKind() {
+	case util.NamespaceKind:
+		workload.SetName(fmt.Sprintf("%s-%s", workload.GetName(), cluster.Name))
+	case util.DeploymentKind:
+		overrides := []patchOperation{
+			{
+				Op:    "replace",
+				Path:  "/metadata/namespace",
+				Value: fmt.Sprintf("%s-%s", workload.GetNamespace(), cluster.Name),
+			},
+			{
+				Op:    "add",
+				Path:  "/spec/template/spec/nodeSelector",
+				Value: cluster.Spec.NodeSelector,
+			},
+		}
+		jsonPatchBytes, err := json.Marshal(overrides)
+		if err != nil {
+			return err
+		}
+
+		patch, err := jsonpatch.DecodePatch(jsonPatchBytes)
+		if err != nil {
+			return err
+		}
+
+		workloadJSONBytes, err := workload.MarshalJSON()
+		if err != nil {
+			return err
+		}
+
+		patchedObjectJSONBytes, err := patch.Apply(workloadJSONBytes)
+		if err != nil {
+			return err
+		}
+
+		if err := workload.UnmarshalJSON(patchedObjectJSONBytes); err != nil {
+			return err
+		}
+	default:
+		overrides := []patchOperation{
+			{
+				Op:    "replace",
+				Path:  "/metadata/namespace",
+				Value: fmt.Sprintf("%s-%s", workload.GetNamespace(), cluster.Name),
+			},
+		}
+		jsonPatchBytes, err := json.Marshal(overrides)
+		if err != nil {
+			return err
+		}
+
+		patch, err := jsonpatch.DecodePatch(jsonPatchBytes)
+		if err != nil {
+			return err
+		}
+
+		workloadJSONBytes, err := workload.MarshalJSON()
+		if err != nil {
+			return err
+		}
+
+		patchedObjectJSONBytes, err := patch.Apply(workloadJSONBytes)
+		if err != nil {
+			return err
+		}
+
+		if err := workload.UnmarshalJSON(patchedObjectJSONBytes); err != nil {
+			return err
+		}
+	}
+	return nil
 }
