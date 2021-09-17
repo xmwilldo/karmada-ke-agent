@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -123,6 +124,7 @@ func (c *WorkStatusController) syncWorkStatus(key util.QueueKey) error {
 	obj, err := helper.GetObjectFromCache(c.RESTMapper, c.InformerManager, fedKey)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			klog.Infof("[Debug]: obj of fedKey: %s not found", fedKey.String())
 			return c.handleDeleteEvent(fedKey)
 		}
 		return err
@@ -152,8 +154,13 @@ func (c *WorkStatusController) syncWorkStatus(key util.QueueKey) error {
 		return err
 	}
 
+	restoredObj, err := restoreNamespace(obj)
+	if err != nil {
+		klog.Errorf("Failed to restore namespace for obj %s/%s: %s", obj.GetNamespace(), obj.GetName(), err)
+		return err
+	}
 	// consult with version manager if current status needs update.
-	desireObj, err := c.getRawManifest(workObject.Spec.Workload.Manifests, obj)
+	desireObj, err := c.getRawManifest(workObject.Spec.Workload.Manifests, restoredObj)
 	if err != nil {
 		return err
 	}
@@ -191,7 +198,7 @@ func (c *WorkStatusController) syncWorkStatus(key util.QueueKey) error {
 	}
 
 	klog.Infof("reflecting %s(%s/%s) status to Work(%s/%s)", obj.GetKind(), obj.GetNamespace(), obj.GetName(), workNamespace, workName)
-	return c.reflectStatus(workObject, obj)
+	return c.reflectStatus(workObject, restoredObj)
 }
 
 func (c *WorkStatusController) handleDeleteEvent(key keys.FederatedKey) error {
@@ -239,9 +246,12 @@ func (c *WorkStatusController) recreateResourceIfNeeded(work *workv1alpha1.Work,
 				klog.Errorf("Failed to the get given member cluster %s", workloadKey.Cluster)
 				return err
 			}
+			klog.Infof("[Debug]: Create manifest for ObjectWatcher, manifest namespaceName: %s/%s, workloadKey namespaceName: %s/%s",
+				manifest.GetNamespace(), manifest.GetName(), workloadKey.Namespace, workloadKey.Name)
 			return c.ObjectWatcher.Create(cluster, manifest)
 		}
 	}
+	klog.Infof("[Debug]: Did not create any manifest for ObjectWatcht")
 	return nil
 }
 
@@ -337,6 +347,9 @@ func (c *WorkStatusController) getRawManifest(manifests []workv1alpha1.Manifest,
 			manifest.GetName() == clusterObj.GetName() {
 			return manifest, nil
 		}
+
+		klog.Infof("[Debug]: Not Match: manifest namespaceName: %s/%s, clusterObj namespaceName: %s/%s",
+			manifest.GetNamespace(), manifest.GetName(), clusterObj.GetNamespace(), clusterObj.GetName())
 	}
 
 	return nil, fmt.Errorf("no such manifest exist")
@@ -421,4 +434,16 @@ func (c *WorkStatusController) getSingleClusterManager(cluster *v1alpha1.Cluster
 // SetupWithManager creates a controller and register to controller manager.
 func (c *WorkStatusController) SetupWithManager(mgr controllerruntime.Manager) error {
 	return controllerruntime.NewControllerManagedBy(mgr).For(&workv1alpha1.Work{}).WithEventFilter(c.PredicateFunc).Complete(c)
+}
+
+func restoreNamespace(clusterObj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	namespaces := strings.Split(clusterObj.GetNamespace(), "-")
+
+	if len(namespaces) != 2 {
+		return nil, fmt.Errorf("failed to split namespace with '-'")
+	}
+
+	robj := clusterObj.DeepCopy()
+	robj.SetNamespace(namespaces[0])
+	return robj, nil
 }

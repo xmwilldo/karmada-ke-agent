@@ -50,6 +50,7 @@ func NewAgentCommand(ctx context.Context) *cobra.Command {
 }
 
 func run(ctx context.Context, karmadaConfig karmadactl.KarmadaConfig, opts *options.Options) error {
+	klog.Infof("Agent version: %s", string("DebugStatusCollect:v2"))
 	controlPlaneRestConfig, err := karmadaConfig.GetRestConfig(opts.KarmadaContext, opts.KarmadaKubeConfig)
 	if err != nil {
 		return fmt.Errorf("error building kubeconfig of karmada control plane: %s", err.Error())

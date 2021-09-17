@@ -2,6 +2,7 @@ package objectwatcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/xmwilldo/karmada-ke-agent/pkg/apis/cluster/v1alpha1"
 	workv1alpha1 "github.com/xmwilldo/karmada-ke-agent/pkg/apis/work/v1alpha1"
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util"
@@ -55,6 +57,10 @@ func NewObjectWatcher(kubeClientSet client.Client, restMapper meta.RESTMapper, c
 }
 
 func (o *objectWatcherImpl) Create(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured) error {
+	if err := changeWorkload(cluster, desireObj); err != nil {
+		return err
+	}
+
 	dynamicClusterClient, err := o.ClusterClientSetFunc(cluster, o.KubeClientSet)
 	if err != nil {
 		klog.Errorf("Failed to build dynamic cluster client for cluster %s.", cluster.Name)
@@ -99,6 +105,10 @@ func (o *objectWatcherImpl) Create(cluster *v1alpha1.Cluster, desireObj *unstruc
 }
 
 func (o *objectWatcherImpl) Update(cluster *v1alpha1.Cluster, desireObj, clusterObj *unstructured.Unstructured) error {
+	if err := changeWorkload(cluster, desireObj); err != nil {
+		return err
+	}
+
 	dynamicClusterClient, err := o.ClusterClientSetFunc(cluster, o.KubeClientSet)
 	if err != nil {
 		klog.Errorf("Failed to build dynamic cluster client for cluster %s.", cluster.Name)
@@ -131,6 +141,10 @@ func (o *objectWatcherImpl) Update(cluster *v1alpha1.Cluster, desireObj, cluster
 }
 
 func (o *objectWatcherImpl) Delete(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured) error {
+	if err := changeWorkload(cluster, desireObj); err != nil {
+		return err
+	}
+
 	dynamicClusterClient, err := o.ClusterClientSetFunc(cluster, o.KubeClientSet)
 	if err != nil {
 		klog.Errorf("Failed to build dynamic cluster client for cluster %s.", cluster.Name)
@@ -165,6 +179,7 @@ func (o *objectWatcherImpl) genObjectKey(obj *unstructured.Unstructured) string 
 
 // recordVersion will add or update resource version records
 func (o *objectWatcherImpl) recordVersion(clusterObj *unstructured.Unstructured, clusterName string) {
+	klog.Infof("[Debug]: recordVersion for clusterObj namespaceName: %s/%s", clusterObj.GetNamespace(), clusterObj.GetName())
 	objVersion := objectVersion(clusterObj)
 	objectKey := o.genObjectKey(clusterObj)
 	if o.isClusterVersionRecordExist(clusterName) {
@@ -216,7 +231,7 @@ func (o *objectWatcherImpl) deleteVersionRecord(clusterName, resourceName string
 
 func (o *objectWatcherImpl) NeedsUpdate(cluster *v1alpha1.Cluster, desiredObj, clusterObj *unstructured.Unstructured) (bool, error) {
 	// get resource version
-	version, exist := o.getVersionRecord(cluster.Name, desiredObj.GroupVersionKind().String()+"/"+desiredObj.GetNamespace()+"/"+desiredObj.GetName())
+	version, exist := o.getVersionRecord(cluster.Name, o.genObjectKey(clusterObj))
 	if !exist {
 		klog.Errorf("Failed to update resource %v/%v for the version record does not exist", desiredObj.GetNamespace(), desiredObj.GetName())
 		return false, fmt.Errorf("failed to update resource %v/%v for the version record does not exist", desiredObj.GetNamespace(), desiredObj.GetName())
@@ -273,4 +288,86 @@ func objectMetaObjEquivalent(a, b metav1.Object) bool {
 		return false
 	}
 	return true
+}
+
+type patchOperation struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value,omitempty"`
+}
+
+// changeWorkload change the workload based on the workload kind
+func changeWorkload(cluster *v1alpha1.Cluster, workload *unstructured.Unstructured) error {
+	switch workload.GetKind() {
+	case util.NamespaceKind:
+		workload.SetName(fmt.Sprintf("%s-%s", workload.GetName(), cluster.Name))
+	case util.DeploymentKind:
+		overrides := []patchOperation{
+			{
+				Op:    "replace",
+				Path:  "/metadata/namespace",
+				Value: fmt.Sprintf("%s-%s", workload.GetNamespace(), cluster.Name),
+			},
+			{
+				Op:    "add",
+				Path:  "/spec/template/spec/nodeSelector",
+				Value: cluster.Spec.NodeSelector,
+			},
+		}
+		jsonPatchBytes, err := json.Marshal(overrides)
+		if err != nil {
+			return err
+		}
+
+		patch, err := jsonpatch.DecodePatch(jsonPatchBytes)
+		if err != nil {
+			return err
+		}
+
+		workloadJSONBytes, err := workload.MarshalJSON()
+		if err != nil {
+			return err
+		}
+
+		patchedObjectJSONBytes, err := patch.Apply(workloadJSONBytes)
+		if err != nil {
+			return err
+		}
+
+		if err := workload.UnmarshalJSON(patchedObjectJSONBytes); err != nil {
+			return err
+		}
+	default:
+		overrides := []patchOperation{
+			{
+				Op:    "replace",
+				Path:  "/metadata/namespace",
+				Value: fmt.Sprintf("%s-%s", workload.GetNamespace(), cluster.Name),
+			},
+		}
+		jsonPatchBytes, err := json.Marshal(overrides)
+		if err != nil {
+			return err
+		}
+
+		patch, err := jsonpatch.DecodePatch(jsonPatchBytes)
+		if err != nil {
+			return err
+		}
+
+		workloadJSONBytes, err := workload.MarshalJSON()
+		if err != nil {
+			return err
+		}
+
+		patchedObjectJSONBytes, err := patch.Apply(workloadJSONBytes)
+		if err != nil {
+			return err
+		}
+
+		if err := workload.UnmarshalJSON(patchedObjectJSONBytes); err != nil {
+			return err
+		}
+	}
+	return nil
 }
