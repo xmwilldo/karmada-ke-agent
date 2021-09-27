@@ -184,7 +184,7 @@ func (c *WorkStatusController) syncWorkStatus(key util.QueueKey) error {
 	}
 
 	if needUpdate {
-		if err := c.ObjectWatcher.Update(cluster, desireObj, obj); err != nil {
+		if err := c.ObjectWatcher.Update(cluster, desireObj, obj, true); err != nil {
 			klog.Errorf("Update %s failed: %v", fedKey.String(), err)
 			return err
 		}
@@ -236,9 +236,15 @@ func (c *WorkStatusController) recreateResourceIfNeeded(work *workv1alpha1.Work,
 			return err
 		}
 
+		workloadOriginNamespace, err := getOriginNamespace(workloadKey.Namespace)
+		if err != nil {
+			klog.Errorf("Failed to get origin namespace of resource gvk: %s, namespaceName: %s/%s", workloadKey.GroupVersionKind(), workloadKey.Namespace, workloadKey.Name)
+			return err
+		}
+
 		desiredGVK := schema.FromAPIVersionAndKind(manifest.GetAPIVersion(), manifest.GetKind())
 		if reflect.DeepEqual(desiredGVK, workloadKey.GroupVersionKind()) &&
-			manifest.GetNamespace() == workloadKey.Namespace &&
+			manifest.GetNamespace() == workloadOriginNamespace &&
 			manifest.GetName() == workloadKey.Name {
 			klog.Infof("recreating %s", workloadKey.String())
 			cluster, err := util.GetCluster(c.Client, workloadKey.Cluster)
@@ -248,7 +254,7 @@ func (c *WorkStatusController) recreateResourceIfNeeded(work *workv1alpha1.Work,
 			}
 			klog.Infof("[Debug]: Create manifest for ObjectWatcher, manifest namespaceName: %s/%s, workloadKey namespaceName: %s/%s",
 				manifest.GetNamespace(), manifest.GetName(), workloadKey.Namespace, workloadKey.Name)
-			return c.ObjectWatcher.Create(cluster, manifest)
+			return c.ObjectWatcher.Create(cluster, manifest, true)
 		}
 	}
 	klog.Infof("[Debug]: Did not create any manifest for ObjectWatcht")
@@ -437,13 +443,22 @@ func (c *WorkStatusController) SetupWithManager(mgr controllerruntime.Manager) e
 }
 
 func restoreNamespace(clusterObj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	namespaces := strings.Split(clusterObj.GetNamespace(), "-")
-
-	if len(namespaces) != 2 {
-		return nil, fmt.Errorf("failed to split namespace with '-'")
+	originNamespace, err := getOriginNamespace(clusterObj.GetNamespace())
+	if err != nil {
+		return nil, err
 	}
 
 	robj := clusterObj.DeepCopy()
-	robj.SetNamespace(namespaces[0])
+	robj.SetNamespace(originNamespace)
 	return robj, nil
+}
+
+func getOriginNamespace(currentNamespace string) (string, error) {
+	namespaces := strings.Split(currentNamespace, "-")
+
+	if len(namespaces) != 2 {
+		return "", fmt.Errorf("failed to split namespace with '-'")
+	}
+
+	return namespaces[0], nil
 }
