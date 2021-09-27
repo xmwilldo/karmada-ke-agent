@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	kubeclientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -111,13 +112,19 @@ func setupControllers(mgr controllerruntime.Manager, opts *options.Options, stop
 		klog.Fatalf("Failed to setup cluster status controller: %v", err)
 	}
 
+	caredNamespaces := make(sets.String, len(opts.Clusters))
+	clusters := strings.Split(opts.Clusters, ",")
+	for _, cluster := range clusters {
+		caredNamespaces.Insert(cluster)
+	}
+
 	objectWatcher := objectwatcher.NewObjectWatcher(mgr.GetClient(), mgr.GetRESTMapper(), util.NewClusterDynamicClientSetForAgent)
 	executionController := &execution.Controller{
 		Client:               mgr.GetClient(),
 		EventRecorder:        mgr.GetEventRecorderFor(execution.ControllerName),
 		RESTMapper:           mgr.GetRESTMapper(),
 		ObjectWatcher:        objectWatcher,
-		PredicateFunc:        helper.NewExecutionPredicateOnAgent(),
+		PredicateFunc:        helper.NewExecutionPredicateOnGroupingAgent(caredNamespaces),
 		ClusterClientSetFunc: util.NewClusterDynamicClientSetForAgent,
 	}
 	if err := executionController.SetupWithManager(mgr); err != nil {
@@ -132,7 +139,7 @@ func setupControllers(mgr controllerruntime.Manager, opts *options.Options, stop
 		StopChan:             stopChan,
 		WorkerNumber:         1,
 		ObjectWatcher:        objectWatcher,
-		PredicateFunc:        helper.NewExecutionPredicateOnAgent(),
+		PredicateFunc:        helper.NewExecutionPredicateOnGroupingAgent(caredNamespaces),
 		ClusterClientSetFunc: util.NewClusterDynamicClientSetForAgent,
 	}
 	workStatusController.RunWorkQueue()
