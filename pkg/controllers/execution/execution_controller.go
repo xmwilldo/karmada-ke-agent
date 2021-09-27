@@ -124,7 +124,7 @@ func (c *Controller) tryDeleteWorkload(cluster *v1alpha1.Cluster, work *workv1al
 			return err
 		}
 
-		err = c.ObjectWatcher.Delete(cluster, workload)
+		err = c.ObjectWatcher.Delete(cluster, workload, true)
 		if err != nil {
 			klog.Errorf("Failed to delete resource in the given member cluster %v, err is %v", cluster.Name, err)
 			return err
@@ -222,7 +222,7 @@ func (c *Controller) tryUpdateWorkload(cluster *v1alpha1.Cluster, workload *unst
 		return c.tryCreateWorkload(cluster, workload)
 	}
 
-	err = c.ObjectWatcher.Update(cluster, workload, clusterObj)
+	err = c.ObjectWatcher.Update(cluster, workload, clusterObj, true)
 	if err != nil {
 		klog.Errorf("Failed to update resource in the given member cluster %s, err is %v", cluster.Name, err)
 		return err
@@ -231,7 +231,7 @@ func (c *Controller) tryUpdateWorkload(cluster *v1alpha1.Cluster, workload *unst
 }
 
 func (c *Controller) tryCreateWorkload(cluster *v1alpha1.Cluster, workload *unstructured.Unstructured) error {
-	err := c.ObjectWatcher.Create(cluster, workload)
+	err := c.ObjectWatcher.Create(cluster, workload, true)
 	if err != nil {
 		klog.Errorf("Failed to create resource in the given member cluster %s, err is %v", cluster.Name, err)
 		return err

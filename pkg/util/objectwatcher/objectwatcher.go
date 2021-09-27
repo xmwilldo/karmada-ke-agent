@@ -29,9 +29,9 @@ const (
 
 // ObjectWatcher manages operations for object dispatched to member clusters.
 type ObjectWatcher interface {
-	Create(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured) error
-	Update(cluster *v1alpha1.Cluster, desireObj, clusterObj *unstructured.Unstructured) error
-	Delete(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured) error
+	Create(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured, workloadNeedsChange bool) error
+	Update(cluster *v1alpha1.Cluster, desireObj, clusterObj *unstructured.Unstructured, workloadNeedsChange bool) error
+	Delete(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured, workloadNeedsChange bool) error
 	NeedsUpdate(cluster *v1alpha1.Cluster, desiredObj, clusterObj *unstructured.Unstructured) (bool, error)
 }
 
@@ -56,9 +56,11 @@ func NewObjectWatcher(kubeClientSet client.Client, restMapper meta.RESTMapper, c
 	}
 }
 
-func (o *objectWatcherImpl) Create(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured) error {
-	if err := changeWorkload(cluster, desireObj); err != nil {
-		return err
+func (o *objectWatcherImpl) Create(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured, workloadNeedsChange bool) error {
+	if workloadNeedsChange {
+		if err := changeWorkload(cluster, desireObj); err != nil {
+			return err
+		}
 	}
 
 	dynamicClusterClient, err := o.ClusterClientSetFunc(cluster, o.KubeClientSet)
@@ -92,7 +94,7 @@ func (o *objectWatcherImpl) Create(cluster *v1alpha1.Cluster, desireObj *unstruc
 				return fmt.Errorf("resource(kind=%s, %s/%s) already exist in cluster %v but not managed by karamda", desireObj.GetKind(), desireObj.GetNamespace(), desireObj.GetName(), cluster.Name)
 			}
 
-			return o.Update(cluster, desireObj, existObj)
+			return o.Update(cluster, desireObj, existObj, false)
 		}
 		klog.Errorf("Failed to create resource(kind=%s, %s/%s), err is %v ", desireObj.GetKind(), desireObj.GetNamespace(), desireObj.GetName(), err)
 		return err
@@ -104,9 +106,11 @@ func (o *objectWatcherImpl) Create(cluster *v1alpha1.Cluster, desireObj *unstruc
 	return nil
 }
 
-func (o *objectWatcherImpl) Update(cluster *v1alpha1.Cluster, desireObj, clusterObj *unstructured.Unstructured) error {
-	if err := changeWorkload(cluster, desireObj); err != nil {
-		return err
+func (o *objectWatcherImpl) Update(cluster *v1alpha1.Cluster, desireObj, clusterObj *unstructured.Unstructured, workloadNeedsChange bool) error {
+	if workloadNeedsChange {
+		if err := changeWorkload(cluster, desireObj); err != nil {
+			return err
+		}
 	}
 
 	dynamicClusterClient, err := o.ClusterClientSetFunc(cluster, o.KubeClientSet)
@@ -140,11 +144,12 @@ func (o *objectWatcherImpl) Update(cluster *v1alpha1.Cluster, desireObj, cluster
 	return nil
 }
 
-func (o *objectWatcherImpl) Delete(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured) error {
-	if err := changeWorkload(cluster, desireObj); err != nil {
-		return err
+func (o *objectWatcherImpl) Delete(cluster *v1alpha1.Cluster, desireObj *unstructured.Unstructured, workloadNeedsChange bool) error {
+	if workloadNeedsChange {
+		if err := changeWorkload(cluster, desireObj); err != nil {
+			return err
+		}
 	}
-
 	dynamicClusterClient, err := o.ClusterClientSetFunc(cluster, o.KubeClientSet)
 	if err != nil {
 		klog.Errorf("Failed to build dynamic cluster client for cluster %s.", cluster.Name)
