@@ -8,10 +8,12 @@ import (
 	"strings"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -44,6 +46,7 @@ type objectWatcherImpl struct {
 	KubeClientSet        client.Client
 	VersionRecord        map[string]map[string]string
 	ClusterClientSetFunc ClientSetFunc
+	createdNamespaces    sets.String
 }
 
 // NewObjectWatcher returns a instance of ObjectWatcher
@@ -75,6 +78,10 @@ func (o *objectWatcherImpl) Create(cluster *v1alpha1.Cluster, desireObj *unstruc
 		return err
 	}
 
+	if err := o.createNamespaceIfNotExists(o.KubeClientSet, desireObj.GetNamespace()); err != nil {
+		klog.Errorf("Failed to create obj for gvk: %s, namespaceName: %s/%s", desireObj.GetObjectKind().GroupVersionKind(), desireObj.GetNamespace(), desireObj.GetName())
+		return err
+	}
 	// Karmada will adopt creating resource due to an existing resource in member cluster, because we don't want to force update or delete the resource created by users.
 	// users should resolve the conflict in person.
 	clusterObj, err := dynamicClusterClient.DynamicClientSet.Resource(gvr).Namespace(desireObj.GetNamespace()).Create(context.TODO(), desireObj, metav1.CreateOptions{})
@@ -243,6 +250,24 @@ func (o *objectWatcherImpl) NeedsUpdate(cluster *v1alpha1.Cluster, desiredObj, c
 	}
 
 	return objectNeedsUpdate(desiredObj, clusterObj, version), nil
+}
+
+func (o *objectWatcherImpl) createNamespaceIfNotExists(client client.Client, namespace string) error {
+	if !o.createdNamespaces.Has(namespace) {
+		namespaceObj := &corev1.Namespace{}
+		namespaceObj.Name = namespace
+		klog.Infof("Namespace %s does not exist, now create it.")
+		if err := client.Create(context.TODO(), namespaceObj); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// This will happen when agent restarts losing createdNamespaces.
+				return nil
+			}
+			return err
+		}
+		o.createdNamespaces.Insert(namespace)
+	}
+	// Namespace has already existed.
+	return nil
 }
 
 /*
