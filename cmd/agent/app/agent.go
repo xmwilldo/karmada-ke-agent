@@ -26,6 +26,7 @@ import (
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util/gclient"
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util/helper"
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util/informermanager"
+	"github.com/xmwilldo/karmada-ke-agent/pkg/util/names"
 	"github.com/xmwilldo/karmada-ke-agent/pkg/util/objectwatcher"
 )
 
@@ -115,7 +116,12 @@ func setupControllers(mgr controllerruntime.Manager, opts *options.Options, stop
 	caredNamespaces := make(sets.String, len(opts.Clusters))
 	clusters := strings.Split(opts.Clusters, ",")
 	for _, cluster := range clusters {
-		caredNamespaces.Insert(cluster)
+		executionSpace, err := names.GenerateExecutionSpaceName(cluster)
+		if err != nil {
+			klog.Errorf("failed to generate executionSpace for cluster: %s, skip watching this cluster", cluster)
+			continue
+		}
+		caredNamespaces.Insert(executionSpace)
 	}
 
 	objectWatcher := objectwatcher.NewObjectWatcher(mgr.GetClient(), mgr.GetRESTMapper(), util.NewClusterDynamicClientSetForAgent)
