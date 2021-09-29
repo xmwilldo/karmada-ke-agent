@@ -3,6 +3,7 @@ package helper
 import (
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -218,6 +219,52 @@ func NewExecutionPredicateOnAgent() predicate.Funcs {
 			}
 
 			return true
+		},
+		GenericFunc: func(genericEvent event.GenericEvent) bool {
+			return false
+		},
+	}
+}
+
+func NewExecutionPredicateOnGroupingAgent(caredNamespaces sets.String) predicate.Funcs {
+	filtNamespace := func(work *workv1alpha1.Work, requireNamespaces sets.String) bool {
+		namespace := work.GetNamespace()
+		_, exists := requireNamespaces[namespace]
+		return exists
+	}
+	return predicate.Funcs{
+		CreateFunc: func(createEvent event.CreateEvent) bool {
+			obj := createEvent.Object.(*workv1alpha1.Work)
+
+			// Ignore the object that has been suppressed.
+			if util.GetLabelValue(obj.Labels, util.PropagationInstruction) == util.PropagationInstructionSuppressed {
+				klog.V(5).Infof("Ignored Work(%s/%s) create event as propagation instruction is suppressed.", obj.Namespace, obj.Name)
+				return false
+			}
+
+			return filtNamespace(obj, caredNamespaces)
+		},
+		UpdateFunc: func(updateEvent event.UpdateEvent) bool {
+			obj := updateEvent.ObjectNew.(*workv1alpha1.Work)
+
+			// Ignore the object that has been suppressed.
+			if util.GetLabelValue(obj.Labels, util.PropagationInstruction) == util.PropagationInstructionSuppressed {
+				klog.V(5).Infof("Ignored Work(%s/%s) update event as propagation instruction is suppressed.", obj.Namespace, obj.Name)
+				return false
+			}
+
+			return filtNamespace(obj, caredNamespaces)
+		},
+		DeleteFunc: func(deleteEvent event.DeleteEvent) bool {
+			obj := deleteEvent.Object.(*workv1alpha1.Work)
+
+			// Ignore the object that has been suppressed.
+			if util.GetLabelValue(obj.Labels, util.PropagationInstruction) == util.PropagationInstructionSuppressed {
+				klog.V(5).Infof("Ignored Work(%s/%s) delete event as propagation instruction is suppressed.", obj.Namespace, obj.Name)
+				return false
+			}
+
+			return filtNamespace(obj, caredNamespaces)
 		},
 		GenericFunc: func(genericEvent event.GenericEvent) bool {
 			return false

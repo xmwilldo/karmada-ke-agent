@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/distribution/distribution/v3 v3.0.0-20210507173845-9329f6a62b67
+	github.com/evanphx/json-patch v4.11.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.2.0
 	github.com/kr/pretty v0.3.0
 	github.com/spf13/cobra v1.1.3
